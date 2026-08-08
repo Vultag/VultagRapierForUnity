@@ -491,6 +491,28 @@ pub extern "C" fn joint_set_prismatic_motor(
     prismatic.set_motor_max_force(max_force);
 }
 #[unsafe(no_mangle)]
+pub extern "C" fn body_set_position(
+    world_ptr: *mut RapierWorld,
+    handle: u64,
+    x: f32,
+    y: f32
+) {
+    let world = unsafe { &mut *world_ptr };
+
+    let body_handle = RigidBodyHandle::from_raw_parts(
+        handle as u32,
+        (handle >> 32) as u32,
+    );
+
+    if let Some(body) = world.bodies.get_mut(body_handle) {
+      let mut pos = *body.position();
+        pos.translation.x = x;
+        pos.translation.y = y;
+
+        body.set_position(pos, true);
+    }
+}
+#[unsafe(no_mangle)]
 pub extern "C" fn body_set_rotation(
     world_ptr: *mut RapierWorld,
     handle: u64,
@@ -508,6 +530,16 @@ pub extern "C" fn body_set_rotation(
             rapier2d::math::Rot2::new(angle),
             true,
         );
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn body_set_state(
+    world: *mut RapierWorld,
+    handle: u64,
+    body_state: BodyStateFFI 
+) {
+    unsafe {
+        (*world).body_set_state(handle, body_state);
     }
 }
 #[unsafe(no_mangle)]
