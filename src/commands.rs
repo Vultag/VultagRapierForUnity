@@ -120,7 +120,8 @@ pub extern "C" fn body_create(
     rot: f32, // radians
     linear_damping: f32,
     angular_damping: f32,
-    freeze_rotation: bool
+    freeze_rotation: bool,
+    enabled: bool
 ) -> u64 {
     let mut builder = match typ {
         0 => RigidBodyBuilder::dynamic(),
@@ -130,6 +131,7 @@ pub extern "C" fn body_create(
     };
 
     builder = builder
+        .enabled(enabled)
         .additional_mass(mass)
         .translation(Vec2::new(x, y))
         .rotation(rot);
@@ -173,6 +175,75 @@ pub extern "C" fn body_destroy(
             true, // remove attached colliders
     );
 }
+#[unsafe(no_mangle)]
+pub extern "C" fn body_set_enabled(
+    world_ptr: *mut RapierWorld,
+    body_handle: u64,
+    enabled: bool,
+) {
+    let world = unsafe { &mut *world_ptr };
+
+    let handle = RigidBodyHandle::from_raw_parts(
+        body_handle as u32,
+        (body_handle >> 32) as u32,
+    );
+
+    if let Some(body) = world.bodies.get_mut(handle) {
+        body.set_enabled(enabled);
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn shape_set_enabled(
+    world_ptr: *mut RapierWorld,
+    shape_handle: u64,
+    enabled: bool,
+) {
+    let world = unsafe { &mut *world_ptr };
+
+    let handle = ColliderHandle::from_raw_parts(
+        shape_handle as u32,
+        (shape_handle >> 32) as u32,
+    );
+
+    if let Some(collider) = world.colliders.get_mut(handle) {
+        collider.set_enabled(enabled);
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn joint_destroy(
+    worldptr: *mut RapierWorld,
+    handle: u64,
+) {
+    let world = unsafe { &mut *worldptr };
+
+    let index = handle as u32;
+    let generation = (handle >> 32) as u32;
+
+    let joint_handle =
+        ImpulseJointHandle::from_raw_parts(index, generation);
+
+    world.impulse_joints.remove(joint_handle, true);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn joint_set_enabled(
+    world_ptr: *mut RapierWorld,
+    joint_handle: u64,
+    enabled: bool,
+) {
+    let world = unsafe { &mut *world_ptr };
+
+    let handle = ImpulseJointHandle::from_raw_parts(
+        joint_handle as u32,
+        (joint_handle >> 32) as u32,
+    );
+
+    if let Some(joint) = world.impulse_joints.get_mut(handle,false) {
+        joint.data.set_enabled(enabled);
+    }
+}
+
 
 
 #[unsafe(no_mangle)]
@@ -334,6 +405,112 @@ pub extern "C" fn body_add_polyline_collider(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn joint_add_fixed(
+    world: *mut RapierWorld,
+    body1: u64,
+    body2: u64,
+    enable_collision:bool,
+    connected_to_world:bool,
+    ax1: f32,
+    ay1: f32,
+    ax2: f32,
+    ay2: f32,
+    enabled: bool
+    
+) -> u64 {
+    let world = unsafe { &mut *world };
+
+    let h1 = RigidBodyHandle::from_raw_parts(body1 as u32, (body1 >> 32) as u32);
+    let h2 = if connected_to_world {
+            world.world_body
+        } else {
+           RigidBodyHandle::from_raw_parts(body2 as u32, (body2 >> 32) as u32)
+        };
+
+    let joint_builder = FixedJointBuilder::new()
+        .local_anchor1(Vec2::new(ax1, ay1))
+        .local_anchor2(Vec2::new(ax2, ay2))
+        .contacts_enabled(enable_collision);
+
+    
+    let mut joint: GenericJoint = joint_builder.into();
+    joint.set_enabled(enabled);
+
+    let handle = world.impulse_joints.insert(h1, h2, joint, true);
+
+    let (index, generation) = handle.into_raw_parts();
+    ((generation as u64) << 32) | index as u64
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn joint_add_rope(
+    world: *mut RapierWorld,
+    body1: u64,
+    body2: u64,
+    enable_collision: bool,
+    connected_to_world: bool,
+    ax1: f32,
+    ay1: f32,
+    ax2: f32,
+    ay2: f32,
+    max_distance: f32,
+    enabled: bool
+) -> u64 {
+    let world = unsafe { &mut *world };
+
+    let h1 = RigidBodyHandle::from_raw_parts(
+        body1 as u32,
+        (body1 >> 32) as u32,
+    );
+
+    let h2 = if connected_to_world {
+        world.world_body
+    } else {
+        RigidBodyHandle::from_raw_parts(
+            body2 as u32,
+            (body2 >> 32) as u32,
+        )
+    };
+
+    let joint_builder = RopeJointBuilder::new(max_distance)
+        .local_anchor1(Vec2::new(ax1, ay1))
+        .local_anchor2(Vec2::new(ax2, ay2))
+        .contacts_enabled(enable_collision);
+
+    let mut joint: GenericJoint = joint_builder.into();
+    joint.set_enabled(enabled);
+
+
+    let handle = world.impulse_joints.insert(
+        h1,
+        h2,
+        joint,
+        true,
+    );
+
+    let (index, generation) = handle.into_raw_parts();
+
+    ((generation as u64) << 32) | index as u64
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn joint_set_rope_max_distance(
+    world: *mut RapierWorld,
+    joint_handle: u64,
+    max_distance: f32,
+) {
+    let world = unsafe { &mut *world };
+
+    let handle = ImpulseJointHandle::from_raw_parts(
+        joint_handle as u32,
+        (joint_handle >> 32) as u32,
+    );
+
+    if let Some(joint) = world.impulse_joints.get_mut(handle,true) {
+        if let Some(rope) = joint.data.as_rope_mut() {
+            rope.set_max_distance(max_distance);
+        }
+    }
+}
+#[unsafe(no_mangle)]
 pub extern "C" fn joint_add_revolute(
     world: *mut RapierWorld,
     body1: u64,
@@ -356,6 +533,7 @@ pub extern "C" fn joint_add_revolute(
     velocity_target: f32,
     velocity_gain: f32,
     max_torque: f32,
+    enabled: bool
     
 ) -> u64 {
     let world = unsafe { &mut *world };
@@ -367,21 +545,23 @@ pub extern "C" fn joint_add_revolute(
            RigidBodyHandle::from_raw_parts(body2 as u32, (body2 >> 32) as u32)
         };
 
-    let mut joint = RevoluteJointBuilder::new()
+    let mut joint_builder = RevoluteJointBuilder::new()
         .local_anchor1(Vec2::new(ax1, ay1))
         .local_anchor2(Vec2::new(ax2, ay2))
         .contacts_enabled(enable_collision);
 
-
     if use_limits {
-        joint = joint.limits([min_angle, max_angle]);
+        joint_builder = joint_builder.limits([min_angle, max_angle]);
     }
 
     if motor_enabled {
-        joint = joint.motor_position(target_angle, stiffness, damping);
-        joint = joint.motor_velocity(velocity_target, velocity_gain);
-        joint = joint.motor_max_force(max_torque);
+        joint_builder = joint_builder.motor_position(target_angle, stiffness, damping);
+        joint_builder = joint_builder.motor_velocity(velocity_target, velocity_gain);
+        joint_builder = joint_builder.motor_max_force(max_torque);
     }
+
+    let mut joint: GenericJoint = joint_builder.into();
+    joint.set_enabled(enabled);
 
     let handle = world.impulse_joints.insert(h1, h2, joint, true);
 
@@ -414,6 +594,7 @@ pub extern "C" fn joint_add_prismatic(
     stiffness: f32,
     damping: f32,
     max_force: f32,
+    enabled: bool
 ) -> u64 {
     let world = unsafe { &mut *world };
 
@@ -433,24 +614,28 @@ pub extern "C" fn joint_add_prismatic(
 
     let axis = Vec2::new(axis_x, axis_y).normalize();
 
-    let mut joint = PrismaticJointBuilder::new(axis)
+    let mut joint_builder = PrismaticJointBuilder::new(axis)
         .local_anchor1(Vec2::new(ax1, ay1))
         .local_anchor2(Vec2::new(ax2, ay2))
         .contacts_enabled(enable_collision);
 
     if use_limits {
-        joint = joint.limits([min_limit, max_limit]);
+        joint_builder = joint_builder.limits([min_limit, max_limit]);
     }
 
     if motor_enabled {
-        joint = joint.motor_position(
+        joint_builder = joint_builder.motor_position(
             target_position,
             stiffness,
             damping,
         );
 
-        joint = joint.motor_max_force(max_force);
+        joint_builder = joint_builder.motor_max_force(max_force);
     }
+
+
+    let mut joint: GenericJoint = joint_builder.into();
+    joint.set_enabled(enabled);
 
     let handle = world.impulse_joints.insert(
         h1,
@@ -462,7 +647,6 @@ pub extern "C" fn joint_add_prismatic(
     let (index, generation) = handle.into_raw_parts();
     ((generation as u64) << 32) | index as u64
 }
-
 #[unsafe(no_mangle)]
 pub extern "C" fn joint_set_prismatic_motor(
     world_ptr: *mut RapierWorld,
@@ -490,6 +674,7 @@ pub extern "C" fn joint_set_prismatic_motor(
 
     prismatic.set_motor_max_force(max_force);
 }
+
 #[unsafe(no_mangle)]
 pub extern "C" fn body_set_position(
     world_ptr: *mut RapierWorld,
@@ -542,6 +727,43 @@ pub extern "C" fn body_set_state(
         (*world).body_set_state(handle, body_state);
     }
 }
+#[unsafe(no_mangle)]
+pub extern "C" fn body_set_fixed(
+    worldptr: *mut RapierWorld,
+    handle_raw: u64
+) {
+    unsafe {
+        let world = &mut *worldptr;
+
+        let handle = RigidBodyHandle::from_raw_parts(
+            handle_raw as u32,
+            (handle_raw >> 32) as u32,
+        );
+
+        if let Some(body) = world.bodies.get_mut(handle) {
+            body.set_body_type(RigidBodyType::Fixed,true);
+        }
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn body_set_dynamic(
+    worldptr: *mut RapierWorld,
+    handle_raw: u64
+) {
+    unsafe {
+        let world = &mut *worldptr;
+
+        let handle = RigidBodyHandle::from_raw_parts(
+            handle_raw as u32,
+            (handle_raw >> 32) as u32,
+        );
+
+        if let Some(body) = world.bodies.get_mut(handle) {
+            body.set_body_type(RigidBodyType::Dynamic,true);
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn body_add_force(
     world: *mut RapierWorld,
