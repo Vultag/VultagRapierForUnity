@@ -1,7 +1,7 @@
 use crate::world::RapierWorld;
 use rapier2d::prelude::*;
 
-const COLLIDER_FLAG: u64 = 1 << 63;
+// const COLLIDER_FLAG: u64 = 1 << 63;
 
 #[repr(C)]
 pub struct TransformUpdate {
@@ -59,11 +59,7 @@ pub extern "C" fn world_set_layer_filters(
     let filters = unsafe { std::slice::from_raw_parts(filters, 32) };
 
     for layer in 0..32 {
-        world.layer_groups[layer] = InteractionGroups {
-            memberships: Group::from_bits_truncate(1 << layer),
-            filter: Group::from_bits_truncate(filters[layer]),
-            test_mode: InteractionTestMode::And,
-        };
+        world.layer_filters[layer] = filters[layer];
     }
 }
 #[unsafe(no_mangle)]
@@ -111,6 +107,40 @@ pub extern "C" fn ignore_collision(
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn collider_set_memberships(
+    world_ptr: *mut RapierWorld,
+    collider_handle: u64,
+    membership: u32,
+) {
+    let world = unsafe { &mut *world_ptr };
+
+    let handle = ColliderHandle::from_raw_parts(
+        collider_handle as u32,
+        (collider_handle >> 32) as u32,
+    );
+
+    if let Some(collider) = world.colliders.get_mut(handle) {
+   
+    let mut filter = 0 as u32;
+        let mut filters_finder = membership;
+
+        while filters_finder != 0 {
+            let selected_layer = filters_finder.trailing_zeros() as usize;
+            filter |= world.layer_filters[selected_layer];
+            filters_finder &= filters_finder - 1;
+    }
+
+        collider.set_collision_groups(
+            InteractionGroups {
+                memberships: Group::from_bits_truncate(membership),
+                filter: Group::from_bits_truncate(filter),
+                test_mode: InteractionTestMode::And,
+            }
+        );
+    }
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn body_create(
     worldptr: *mut RapierWorld,
     typ: u8,
@@ -125,7 +155,7 @@ pub extern "C" fn body_create(
 ) -> u64 {
     let mut builder = match typ {
         0 => RigidBodyBuilder::dynamic(),
-        1 => RigidBodyBuilder::kinematic_position_based(),
+        1 => RigidBodyBuilder::kinematic_velocity_based(),
         2 => RigidBodyBuilder::fixed(),
         _ => RigidBodyBuilder::dynamic(),
     };
@@ -254,32 +284,72 @@ pub extern "C" fn body_add_circle_collider(
     ox: f32,
     oy: f32,
     friction: f32,
-    layer: u8,
-    register_event: bool
-) {
+    layer: u32,
+    register_event: bool,
+    is_trigger: bool
+) ->u64 {
     let world = unsafe { &mut *worldptr };
 
     let index = handle as u32;
     let generation = (handle >> 32) as u32;
-    let group = world.layer_groups[layer as usize];
+
+    let mut filter = 0 as u32;
+    let mut filters_finder = layer;
+
+    //  while filters_finder != 0 {
+    //         let selected_layer = filters_finder.trailing_zeros() as usize;
+    //         filter |= world.layer_filters[selected_layer];
+    //         filters_finder &= filters_finder - 1;
+    // }
+    for layer_count in 0..32 {
+        if layer & (1 << layer_count) != 0 {
+            filter |= world.layer_filters[layer_count];
+        }
+    }
+
+    let group = InteractionGroups {
+            memberships: Group::from_bits_truncate( layer),
+            filter: Group::from_bits_truncate(filter),
+            test_mode: InteractionTestMode::And,
+        };
 
     let body_handle =
         rapier2d::prelude::RigidBodyHandle::from_raw_parts(index, generation);
+
+    let mut collision_types = ActiveCollisionTypes::default();
+
+    if is_trigger {
+        // Don't optimize away kinematic/static colision detection
+    collision_types =
+        ActiveCollisionTypes::KINEMATIC_FIXED
+        | ActiveCollisionTypes::KINEMATIC_KINEMATIC
+        | ActiveCollisionTypes::DYNAMIC_FIXED
+        | ActiveCollisionTypes::DYNAMIC_KINEMATIC
+        | ActiveCollisionTypes::DYNAMIC_DYNAMIC;
+    }
 
     let collider = ColliderBuilder::ball(radius)
         .translation(Vec2::new(ox, oy))
         .friction(friction)
         .collision_groups(group)
+        .sensor(is_trigger)
         .active_events(
         if register_event {ActiveEvents::COLLISION_EVENTS} else {ActiveEvents::empty()})
+        .active_collision_types(collision_types)
         .build();
 
-    world.colliders.insert_with_parent(
+    let collider_handle = world.colliders.insert_with_parent(
         collider,
         body_handle,
         &mut world.bodies,
     );
+
+    let (index, generation) = collider_handle.into_raw_parts();
+    ((generation as u64) << 32) | (index as u64)  
+
 }
+
+/* Colliders need a body
 #[unsafe(no_mangle)]
 pub extern "C" fn add_standalone_circle_collider(
     worldptr: *mut RapierWorld,
@@ -306,41 +376,6 @@ pub extern "C" fn add_standalone_circle_collider(
     let (index, generation) = collider_handle.into_raw_parts();
     // to have unique handle for bodies and colliders
     COLLIDER_FLAG | ((generation as u64) << 32) | (index as u64)  
-}
-#[unsafe(no_mangle)]
-pub extern "C" fn body_add_box_collider(
-    world_ptr: *mut RapierWorld,
-    handle: u64,
-    hx: f32,
-    hy: f32,
-    ox: f32,
-    oy: f32,
-    friction: f32,
-    layer: u8,
-    collide_event: bool 
-) {
-    let world = unsafe { &mut *world_ptr };
-
-    let index = handle as u32;
-    let generation = (handle >> 32) as u32;
-    let group = world.layer_groups[layer as usize];
-
-    let body_handle =
-        rapier2d::prelude::RigidBodyHandle::from_raw_parts(index, generation);
-
-    let collider = ColliderBuilder::cuboid(hx, hy)
-        .translation(Vec2::new(ox, oy))
-        .friction(friction)
-        .collision_groups(group)
-        .active_events(
-        if collide_event {ActiveEvents::COLLISION_EVENTS} else {ActiveEvents::empty()})
-        .build();
-
-    world.colliders.insert_with_parent(
-        collider,
-        body_handle,
-        &mut world.bodies,
-    );
 }
 #[unsafe(no_mangle)]
 pub extern  "C" fn add_standalone_box_collider(
@@ -370,19 +405,116 @@ pub extern  "C" fn add_standalone_box_collider(
     // to have unique handle for bodies and colliders
     COLLIDER_FLAG | ((generation as u64) << 32) | (index as u64)  
 }
+
+*/
+
+#[unsafe(no_mangle)]
+pub extern "C" fn body_add_box_collider(
+    world_ptr: *mut RapierWorld,
+    handle: u64,
+    hx: f32,
+    hy: f32,
+    ox: f32,
+    oy: f32,
+    friction: f32,
+    layer: u32,
+    collide_event: bool,
+    is_trigger: bool
+) ->u64 {
+    let world = unsafe { &mut *world_ptr };
+
+    let index = handle as u32;
+    let generation = (handle >> 32) as u32;
+  
+    let mut filter = 0 as u32;
+    let mut filters_finder: u32 = layer;
+
+    //   while filters_finder != 0 {
+    //     let selected_layer = filters_finder.trailing_zeros() as usize;
+    //     filter |= world.layer_filters[selected_layer];
+    //     filters_finder &= filters_finder - 1;
+    // }
+      for layer_count in 0..32 {
+        if layer & (1 << layer_count) != 0 {
+            filter |= world.layer_filters[layer_count];
+        }
+    }
+
+    let group = InteractionGroups {
+            memberships: Group::from_bits_truncate( layer),
+            filter: Group::from_bits_truncate(filter),
+            test_mode: InteractionTestMode::And,
+        };
+
+    let body_handle =
+        rapier2d::prelude::RigidBodyHandle::from_raw_parts(index, generation);
+
+    let mut collision_types = ActiveCollisionTypes::default();
+
+    if is_trigger {
+        // Don't optimize away kinematic/static colision detection
+    collision_types =
+        ActiveCollisionTypes::KINEMATIC_FIXED
+        | ActiveCollisionTypes::KINEMATIC_KINEMATIC
+        | ActiveCollisionTypes::DYNAMIC_FIXED
+        | ActiveCollisionTypes::DYNAMIC_KINEMATIC
+        | ActiveCollisionTypes::DYNAMIC_DYNAMIC;
+    }
+
+    let events = if collide_event {
+        ActiveEvents::COLLISION_EVENTS
+    } else {
+        ActiveEvents::empty()
+    };
+
+    let collider = ColliderBuilder::cuboid(hx, hy)
+        .translation(Vec2::new(ox, oy))
+        .friction(friction)
+        .collision_groups(group)
+        .sensor(is_trigger)
+        .active_events(events)
+        .active_collision_types(collision_types)
+        .build();
+
+    let collider_handle = world.colliders.insert_with_parent(
+        collider,
+        body_handle,
+        &mut world.bodies,
+    );
+
+    let (index, generation) = collider_handle.into_raw_parts();
+    ((generation as u64) << 32) | (index as u64)  
+
+}
 #[unsafe(no_mangle)]
 pub extern "C" fn body_add_polyline_collider(
     world_ptr: *mut RapierWorld,
     handle: u64,
     vertices_ptr: *const Vec2,
     count: usize,
-    friction: f32
+    friction: f32,
+    layer: u32
 ) {
 
     let world = unsafe { &mut *world_ptr };
 
     let index = handle as u32;
     let generation = (handle >> 32) as u32;
+
+    let mut filter = 0 as u32;
+    let mut filters_finder = layer;
+
+      while filters_finder != 0 {
+        let selected_layer = filters_finder.trailing_zeros() as usize;
+        filter |= world.layer_filters[selected_layer];
+        filters_finder &= filters_finder - 1;
+    }
+
+    let group = InteractionGroups {
+            memberships: Group::from_bits_truncate(1 << layer),
+            filter: Group::from_bits_truncate(filter),
+            test_mode: InteractionTestMode::And,
+        };
 
     let body_handle =
         rapier2d::prelude::RigidBodyHandle::from_raw_parts(index, generation);
@@ -395,7 +527,10 @@ pub extern "C" fn body_add_polyline_collider(
                 indices.push([i as u32, ((i + 1) % vertices.len()) as u32]);
             }
 
-    let collider = ColliderBuilder::polyline(vertices, Some(indices)).friction(friction).build();
+    let collider = ColliderBuilder::polyline(vertices, Some(indices))
+    .friction(friction)
+    .collision_groups(group)
+    .build();
    
     world.colliders.insert_with_parent(
         collider,
@@ -854,20 +989,24 @@ pub extern "C" fn world_step(
             
             match event {
                 CollisionEvent::Started(c1, c2, _) => {
+
                         let collider1 = world.colliders.get(c1).unwrap();
                         let collider2 = world.colliders.get(c2).unwrap();
+
+                        let body1 = collider1.parent().unwrap();
+                        let body2 = collider2.parent().unwrap();
+
+                        let (body1_index, body1_generation) = body1.into_raw_parts();
+                        let (body2_index, body2_generation) = body2.into_raw_parts();
 
                         if collider1.is_sensor(){
 
                             if trigger_event_count >= trigger_event_capacity {
                                 break;
                             }
-                            let (c1_index, c1_generation) = c1.into_raw_parts();
-                            let body2 = collider2.parent().unwrap();
-                            let (body2_index, body2_generation) = body2.into_raw_parts();
 
                             trigger_events[trigger_event_count] = ColTrigEventFFI {
-                                entity_a: COLLIDER_FLAG | ((c1_generation as u64) << 32) | (c1_index as u64),
+                                entity_a: ((body1_generation as u64) << 32) | (body1_index as u64),
                                 entity_b: ((body2_generation as u64) << 32) | (body2_index as u64),
                             };
                             trigger_event_count += 1;
@@ -877,12 +1016,9 @@ pub extern "C" fn world_step(
                             if trigger_event_count >= trigger_event_capacity {
                                 break;
                             }
-                            let (c2_index, c2_generation) = c2.into_raw_parts();
-                            let body1 = collider1.parent().unwrap();
-                            let (body1_index, body1_generation) = body1.into_raw_parts();
-
+                         
                             trigger_events[trigger_event_count] = ColTrigEventFFI {
-                                entity_a: COLLIDER_FLAG | ((c2_generation as u64) << 32) | (c2_index as u64),
+                                entity_a: ((body2_generation as u64) << 32) | (body2_index as u64),
                                 entity_b: ((body1_generation as u64) << 32) | (body1_index as u64),
                             };
                             trigger_event_count += 1;
@@ -891,12 +1027,7 @@ pub extern "C" fn world_step(
                             if collision_event_count >= collision_event_capacity {
                                 break;
                             }
-                            let body1 = collider1.parent().unwrap();
-                            let body2 = collider2.parent().unwrap();
-
-                            let (body1_index, body1_generation) = body1.into_raw_parts();
-                            let (body2_index, body2_generation) = body2.into_raw_parts();
-
+                         
                             collision_events[collision_event_count] = ColTrigEventFFI {
                                 entity_a: ((body1_generation as u64) << 32) | (body1_index as u64),
                                 entity_b: ((body2_generation as u64) << 32) | (body2_index as u64),

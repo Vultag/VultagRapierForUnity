@@ -21,7 +21,7 @@ pub struct WorldSnapshot {
     pub multibody_joints: MultibodyJointSet,
     pub ccd_solver: CCDSolver,
 
-    pub layer_groups: [InteractionGroups; 32],
+    pub layer_filters: [u32; 32],
     pub ignore_pairs: IgnorePairs
 }
 pub struct SerializedWorldSnapshot {
@@ -54,7 +54,7 @@ impl RapierWorld {
             multibody_joints: self.multibody_joints.clone(),
             ccd_solver: self.ccd_solver.clone(),
 
-            layer_groups: self.layer_groups,
+            layer_filters: self.layer_filters,
             ignore_pairs: self.ignore_pairs.clone(),
         };
 
@@ -80,7 +80,7 @@ impl RapierWorld {
 
         self.ccd_solver = snapshot.ccd_solver;
 
-        self.layer_groups = snapshot.layer_groups;
+        self.layer_filters = snapshot.layer_filters;
 
         self.ignore_pairs = snapshot.ignore_pairs;
 

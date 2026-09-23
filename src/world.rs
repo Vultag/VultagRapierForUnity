@@ -47,7 +47,7 @@ pub struct RapierWorld {
     pub multibody_joints: MultibodyJointSet,
     pub ccd_solver: CCDSolver,
 
-    pub layer_groups: [InteractionGroups; 32],
+    pub layer_filters: [u32; 32],
 
     pub collision_recv: Receiver<CollisionEvent>,
     pub contact_recv: Receiver<ContactForceEvent>,
@@ -85,11 +85,7 @@ impl RapierWorld {
             multibody_joints: MultibodyJointSet::new(),
             ccd_solver: CCDSolver::new(),
 
-            layer_groups: [InteractionGroups {
-                memberships: Group::ALL,
-                filter: Group::ALL,
-                test_mode: InteractionTestMode::And,
-            }; 32],
+            layer_filters: [0; 32],
 
             collision_recv,
             contact_recv,
@@ -147,6 +143,7 @@ impl RapierWorld {
         let body_handle = rapier2d::prelude::RigidBodyHandle::from_raw_parts(index, generation);
 
         let body = &mut self.bodies[body_handle];
+    
         body.set_translation(Vec2::new(body_state.x, body_state.y), true);
         body.set_rotation(Rot2::new(body_state.rotation), true);
         body.set_linvel(Vec2::new(body_state.velocity_x,body_state.velocity_y), true);
@@ -154,33 +151,7 @@ impl RapierWorld {
         body.reset_forces(false);
         body.reset_torques(false);
     }
+    
+
 
 }
-
-
-// #[unsafe(no_mangle)]
-// pub extern "C" fn rapier_world_destroy(ptr: *mut RapierWorld) {
-//     if ptr.is_null() {
-//         return;
-//     }
-
-//     unsafe {
-//         drop(Box::from_raw(ptr));
-//     }
-// }
-// #[no_mangle]
-// pub extern "C" fn rapier_world_step(
-//     ptr: *mut RapierWorld,
-//     dt: f32
-// ) {
-//     ///OPTI remvove
-//     if ptr.is_null() {
-//         return;
-//     }
-
-//     let world = unsafe {
-//         &mut *ptr
-//     };
-
-//     world.step(dt);
-// }
