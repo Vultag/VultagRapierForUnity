@@ -131,7 +131,7 @@ impl RapierWorld {
         body.apply_impulse(Vec2::new(linear_x, linear_y), true);
         body.apply_torque_impulse(angular, true);
     }
-     pub fn body_set_state(  
+    pub fn body_set_state(  
     &mut self,
     handle: u64,
     body_state: BodyStateFFI 

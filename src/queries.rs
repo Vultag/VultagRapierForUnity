@@ -11,6 +11,7 @@ impl RapierWorld {
         x: f32,
         y: f32,
         radius: f32,
+        memberships: u32,
         filter: u32
     ) -> Option<RigidBodyHandle> {
 
@@ -35,7 +36,7 @@ impl RapierWorld {
         let shape = Ball::new(radius);
 
     let query_groups = InteractionGroups {
-                memberships: Group::ALL,
+                memberships: Group::from_bits_truncate(memberships),
                 filter: Group::from_bits_truncate(filter),
                 test_mode: InteractionTestMode::And,
             };
@@ -95,6 +96,7 @@ pub extern "C" fn world_get_closest_body(
     x: f32,
     y: f32,
     radius: f32,
+    memberships: u32,
     filter: u32
 ) -> u64 {
 
@@ -105,6 +107,7 @@ pub extern "C" fn world_get_closest_body(
         x,
         y,
         radius,
+        memberships,
         filter
     ) else {
         return 0;

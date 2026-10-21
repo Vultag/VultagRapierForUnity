@@ -504,14 +504,14 @@ pub extern "C" fn body_add_polyline_collider(
     let mut filter = 0 as u32;
     let mut filters_finder = layer;
 
-      while filters_finder != 0 {
-        let selected_layer = filters_finder.trailing_zeros() as usize;
-        filter |= world.layer_filters[selected_layer];
-        filters_finder &= filters_finder - 1;
+       while filters_finder != 0 {
+         let selected_layer = filters_finder.trailing_zeros() as usize;
+         filter |= world.layer_filters[selected_layer];
+         filters_finder &= filters_finder - 1;
     }
 
     let group = InteractionGroups {
-            memberships: Group::from_bits_truncate(1 << layer),
+            memberships: Group::from_bits_truncate(layer),
             filter: Group::from_bits_truncate(filter),
             test_mode: InteractionTestMode::And,
         };
