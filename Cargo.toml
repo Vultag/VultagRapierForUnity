@@ -9,7 +9,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-rapier2d = { version = "0.33.0", features = ["serde-serialize"] }
-glam = "0.33.2"
+rapier2d = { version = "0.36.1", features = ["serde-serialize", "enhanced-determinism"] }
+glam = "0.34.2"
 serde = { version = "1.0.228", features = ["derive"] }
 bincode = "1.3"

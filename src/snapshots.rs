@@ -87,6 +87,7 @@ impl RapierWorld {
         // Recreate runtime-only event system
         let (collision_send, collision_recv) = channel();
         let (contact_send, contact_recv) = channel();
+        let (soft_body_tear_send, _soft_body_tear_recv) = channel();
 
         self.collision_recv = collision_recv;
         self.contact_recv = contact_recv;
@@ -94,6 +95,7 @@ impl RapierWorld {
         self.event_handler = ChannelEventCollector::new(
             collision_send,
             contact_send,
+            soft_body_tear_send,
         );
     }
     

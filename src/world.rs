@@ -20,7 +20,7 @@ impl PhysicsHooks for IgnorePairs {
         if self.ignored.contains(&(a, b)) || self.ignored.contains(&(b, a)) {
             return None; // Ignore this pair
         }
-        Some(SolverFlags::COMPUTE_IMPULSES)
+        Some(SolverFlags::COMPUTE_RIGID_IMPULSES)
     }
 }
 
@@ -45,6 +45,7 @@ pub struct RapierWorld {
     pub colliders: ColliderSet,
     pub impulse_joints: ImpulseJointSet,
     pub multibody_joints: MultibodyJointSet,
+    pub soft_bodies: SoftBodySet,
     pub ccd_solver: CCDSolver,
 
     pub layer_filters: [u32; 32],
@@ -68,6 +69,8 @@ impl RapierWorld {
             let ignore_pairs = IgnorePairs {
                 ignored: HashSet::new(),
             };
+            let (soft_body_tear_send, soft_body_tear_recv) =
+            std::sync::mpsc::channel();
 
         Self {
             pipeline: PhysicsPipeline::new(),
@@ -83,6 +86,7 @@ impl RapierWorld {
             colliders: ColliderSet::new(),
             impulse_joints: ImpulseJointSet::new(),
             multibody_joints: MultibodyJointSet::new(),
+            soft_bodies: SoftBodySet::new(),
             ccd_solver: CCDSolver::new(),
 
             layer_filters: [0; 32],
@@ -93,6 +97,7 @@ impl RapierWorld {
             event_handler: ChannelEventCollector::new(
                 collision_send,
                 contact_send,
+                soft_body_tear_send,
             ),
             snapshot: SerializedWorldSnapshot::new(),
             }
@@ -110,6 +115,7 @@ impl RapierWorld {
             &mut self.colliders,
             &mut self.impulse_joints,
             &mut self.multibody_joints,
+            &mut self.soft_bodies,
             &mut self.ccd_solver,
             &mut self.ignore_pairs,
             &mut self.event_handler,
@@ -144,12 +150,18 @@ impl RapierWorld {
 
         let body = &mut self.bodies[body_handle];
     
-        body.set_translation(Vec2::new(body_state.x, body_state.y), true);
-        body.set_rotation(Rot2::new(body_state.rotation), true);
-        body.set_linvel(Vec2::new(body_state.velocity_x,body_state.velocity_y), true);
-        body.set_angvel(body_state.angular_velocity, true);
+        body.set_translation(Vec2::new(body_state.x, body_state.y), false);
+        // Avoid epsilon difference that tigger desync-prone matrix calculation that cascade into major desync ?
+        if (body.rotation().angle() - body_state.rotation).abs() > 1e-5 {
+            body.set_rotation(Rot2::new(body_state.rotation), false);
+        }
+
+        body.set_linvel(Vec2::new(body_state.velocity_x,body_state.velocity_y), false);
+        body.set_angvel(body_state.angular_velocity, false);
         body.reset_forces(false);
         body.reset_torques(false);
+
+                
     }
     
 

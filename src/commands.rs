@@ -13,6 +13,8 @@ pub struct TransformUpdate {
 pub struct ColTrigEventFFI {
     pub entity_a: u64,
     pub entity_b: u64,
+    pub normal_x: f32,
+    pub normal_y: f32,
     //pub event_type: , // 0 = Enter, 1 = Exit
 }#[repr(C)]
 pub struct BodyStateFFI {
@@ -151,6 +153,7 @@ pub extern "C" fn body_create(
     linear_damping: f32,
     angular_damping: f32,
     freeze_rotation: bool,
+    can_sleep: bool,
     enabled: bool
 ) -> u64 {
     let mut builder = match typ {
@@ -164,7 +167,8 @@ pub extern "C" fn body_create(
         .enabled(enabled)
         .additional_mass(mass)
         .translation(Vec2::new(x, y))
-        .rotation(rot);
+        .rotation(rot)
+        .can_sleep(can_sleep);
 
     if freeze_rotation {
         builder = builder.lock_rotations();
@@ -202,6 +206,7 @@ pub extern "C" fn body_destroy(
             &mut world.colliders,
             &mut world.impulse_joints,
             &mut world.multibody_joints,
+            &mut world.soft_bodies,
             true, // remove attached colliders
     );
 }
@@ -985,10 +990,21 @@ pub extern "C" fn world_step(
             trans_count += 1;
         }
 
+        let mut normal = Vector::ZERO;
+
         while let Ok(event) = world.collision_recv.try_recv() {
             
+
             match event {
                 CollisionEvent::Started(c1, c2, _) => {
+
+                        normal = Vector::ZERO;
+
+                        if let Some(pair) = world.narrow_phase.contact_pair(c1, c2) {
+                            if let Some((manifold, _contact)) = pair.find_deepest_contact() {
+                                normal = manifold.data.normal;
+                            }
+                        }
 
                         let collider1 = world.colliders.get(c1).unwrap();
                         let collider2 = world.colliders.get(c2).unwrap();
@@ -1008,6 +1024,8 @@ pub extern "C" fn world_step(
                             trigger_events[trigger_event_count] = ColTrigEventFFI {
                                 entity_a: ((body1_generation as u64) << 32) | (body1_index as u64),
                                 entity_b: ((body2_generation as u64) << 32) | (body2_index as u64),
+                                normal_x: normal.x,
+                                normal_y: normal.y,
                             };
                             trigger_event_count += 1;
                         }
@@ -1020,6 +1038,8 @@ pub extern "C" fn world_step(
                             trigger_events[trigger_event_count] = ColTrigEventFFI {
                                 entity_a: ((body2_generation as u64) << 32) | (body2_index as u64),
                                 entity_b: ((body1_generation as u64) << 32) | (body1_index as u64),
+                                normal_x: normal.x,
+                                normal_y: normal.y,
                             };
                             trigger_event_count += 1;
                         }
@@ -1031,6 +1051,8 @@ pub extern "C" fn world_step(
                             collision_events[collision_event_count] = ColTrigEventFFI {
                                 entity_a: ((body1_generation as u64) << 32) | (body1_index as u64),
                                 entity_b: ((body2_generation as u64) << 32) | (body2_index as u64),
+                                normal_x: normal.x,
+                                normal_y: normal.y,
                             };
                             collision_event_count+=1;
                         }
